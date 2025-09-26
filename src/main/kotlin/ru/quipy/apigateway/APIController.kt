@@ -31,7 +31,7 @@ class APIController {
     data class User(val id: UUID, val name: String)
 
     @PostMapping("/orders")
-    @Bulkhead(name = "bulkheadApi", type = Bulkhead.Type.SEMAPHORE)
+    //@Bulkhead(name = "bulkheadApi", type = Bulkhead.Type.SEMAPHORE)
     @RateLimiter(name = "rateLimiterApi")
     fun createOrder(@RequestParam userId: UUID, @RequestParam price: Int): Order {
         logger.info("Start of createOrder()")
