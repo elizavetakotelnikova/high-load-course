@@ -1,6 +1,5 @@
 package ru.quipy.apigateway
 
-import io.github.resilience4j.bulkhead.annotation.Bulkhead
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
@@ -31,7 +30,6 @@ class APIController {
     data class User(val id: UUID, val name: String)
 
     @PostMapping("/orders")
-    @Bulkhead(name = "bulkheadApi", type = Bulkhead.Type.SEMAPHORE)
     @RateLimiter(name = "rateLimiterApi")
     fun createOrder(@RequestParam userId: UUID, @RequestParam price: Int): Order {
         logger.info("Start of createOrder()")
@@ -60,7 +58,6 @@ class APIController {
     }
 
     @PostMapping("/orders/{orderId}/payment")
-    @Bulkhead(name = "bulkheadApi", type = Bulkhead.Type.SEMAPHORE)
     @RateLimiter(name = "rateLimiterApi")
     fun payOrder(@PathVariable orderId: UUID, @RequestParam deadline: Long): PaymentSubmissionDto {
         val paymentId = UUID.randomUUID()
