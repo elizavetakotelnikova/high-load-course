@@ -13,7 +13,6 @@ import okhttp3.Request
 import okhttp3.RequestBody
 import org.slf4j.LoggerFactory
 import ru.quipy.common.utils.CompositeRateLimiter
-import ru.quipy.common.utils.LeakingBucketRateLimiter
 import ru.quipy.common.utils.RateLimitExceededException
 import ru.quipy.common.utils.SlidingWindowRateLimiter
 import ru.quipy.common.utils.TokenBucketRateLimiter
@@ -59,97 +58,84 @@ class PaymentExternalSystemAdapterImpl(
         .tag("outcome", "error")
         .register(Metrics.globalRegistry)
 
-    val client = OkHttpClient.Builder().build()
-    /*val payOrderBucket = Bucket.builder()
-        .addLimit(Function { limit: BandwidthBuilderCapacityStage? ->
-            limit!!
-                .capacity(40)
-                .refillIntervally(11, Duration.ofSeconds(1))
-        })
-        .build();*/
-    val tokenBucket = TokenBucketRateLimiter(
-        rate = properties.rateLimitPerSec,
-        bucketMaxCapacity = properties.rateLimitPerSec + 5,
-        window = 1,
-        timeUnit = TimeUnit.SECONDS
+    private val client = OkHttpClient.Builder().build()
+    val slidingWindowRateLimiter = SlidingWindowRateLimiter(
+        rate = properties.rateLimitPerSec.toLong(),
+        window = Duration.ofSeconds(1)
     )
 
-        @RateLimiter(name = "payOrderExternal")
-        override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long) {
-            if (!tokenBucket.tick()) {
-                throw RateLimitExceededException()
-            }
-            logger.warn("[$accountName] Submitting payment request for payment $paymentId")
-            val transactionId = UUID.randomUUID()
-            paymentRequestsCounter.increment()
+    override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long) {
+        logger.warn("[$accountName] Submitting payment request for payment $paymentId")
+        val transactionId = UUID.randomUUID()
 
-            // Вне зависимости от исхода оплаты важно отметить что она была отправлена.
-            // Это требуется сделать ВО ВСЕХ СЛУЧАЯХ, поскольку эта информация используется сервисом тестирования.
-            paymentESService.update(paymentId) {
-                it.logSubmission(success = true, transactionId, now(), Duration.ofMillis(now() - paymentStartedAt))
-            }
-
-            logger.info("[$accountName] Submit: $paymentId , txId: $transactionId")
-
-            try {
-                val request = Request.Builder().run {
-                    url("http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount")
-                    post(emptyBody)
-                }.build()
-
-                semaphore.acquire()
-                try {
-                    client.newCall(request).execute().use { response ->
-                        val body = try {
-                            mapper.readValue(response.body?.string(), ExternalSysResponse::class.java)
-                        } catch (e: Exception) {
-                            logger.error("[$accountName] [ERROR] Payment processed for txId: $transactionId, payment: $paymentId, result code: ${response.code}, reason: ${response.body?.string()}")
-                            ExternalSysResponse(transactionId.toString(), paymentId.toString(), false, e.message)
-                        }
-
-                        logger.warn("[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, succeeded: ${body.result}, message: ${body.message}")
-
-                        if (body.result) {
-                            paymentSuccessCounter.increment()
-                        } else {
-                            paymentErrorCounter.increment()
-                        }
-
-                        // Здесь мы обновляем состояние оплаты в зависимости от результата в базе данных оплат.
-                        // Это требуется сделать ВО ВСЕХ ИСХОДАХ (успешная оплата / неуспешная / ошибочная ситуация)
-                        paymentESService.update(paymentId) {
-                            it.logProcessing(body.result, now(), transactionId, reason = body.message)
-                        }
-                    }
-                } finally {
-                    semaphore.release()
-                }
-            } catch (e: Exception) {
-                when (e) {
-                    is SocketTimeoutException -> {
-                        logger.error("[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId", e)
-                        paymentESService.update(paymentId) {
-                            it.logProcessing(false, now(), transactionId, reason = "Request timeout.")
-                        }
-                    }
-
-                    else -> {
-                        logger.error("[$accountName] Payment failed for txId: $transactionId, payment: $paymentId", e)
-
-                        paymentESService.update(paymentId) {
-                            it.logProcessing(false, now(), transactionId, reason = e.message)
-                        }
-                    }
-                }
-                paymentErrorCounter.increment()
-            }
+        // Вне зависимости от исхода оплаты важно отметить что она была отправлена.
+        // Это требуется сделать ВО ВСЕХ СЛУЧАЯХ, поскольку эта информация используется сервисом тестирования.
+        paymentESService.update(paymentId) {
+            it.logSubmission(success = true, transactionId, now(), Duration.ofMillis(now() - paymentStartedAt))
         }
 
-                override fun price() = properties.price
+        logger.info("[$accountName] Submit: $paymentId , txId: $transactionId")
 
-                override fun isEnabled() = properties.enabled
+        try {
+            slidingWindowRateLimiter.tickBlocking()
+            val request = Request.Builder().run {
+                url("http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount")
+                post(emptyBody)
+            }.build()
 
-                override fun name() = properties.accountName
+            semaphore.acquire()
+            try {
+                client.newCall(request).execute().use { response ->
+                    val body = try {
+                        mapper.readValue(response.body?.string(), ExternalSysResponse::class.java)
+                    } catch (e: Exception) {
+                        logger.error("[$accountName] [ERROR] Payment processed for txId: $transactionId, payment: $paymentId, result code: ${response.code}, reason: ${response.body?.string()}")
+                        ExternalSysResponse(transactionId.toString(), paymentId.toString(), false, e.message)
+                    }
+
+                    logger.warn("[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, succeeded: ${body.result}, message: ${body.message}")
+                    paymentRequestsCounter.increment()
+                    if (body.result) {
+                        paymentSuccessCounter.increment()
+                    } else {
+                        paymentErrorCounter.increment()
+                    }
+
+                    // Здесь мы обновляем состояние оплаты в зависимости от результата в базе данных оплат.
+                    // Это требуется сделать ВО ВСЕХ ИСХОДАХ (успешная оплата / неуспешная / ошибочная ситуация)
+                    paymentESService.update(paymentId) {
+                        it.logProcessing(body.result, now(), transactionId, reason = body.message)
+                    }
+                }
+            } finally {
+                semaphore.release()
+            }
+        } catch (e: Exception) {
+            when (e) {
+                is SocketTimeoutException -> {
+                    logger.error("[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId", e)
+                    paymentESService.update(paymentId) {
+                        it.logProcessing(false, now(), transactionId, reason = "Request timeout.")
+                    }
+                }
+
+                else -> {
+                    logger.error("[$accountName] Payment failed for txId: $transactionId, payment: $paymentId", e)
+
+                    paymentESService.update(paymentId) {
+                        it.logProcessing(false, now(), transactionId, reason = e.message)
+                    }
+                }
+            }
+            paymentErrorCounter.increment()
+        }
+    }
+
+    override fun price() = properties.price
+
+    override fun isEnabled() = properties.enabled
+
+    override fun name() = properties.accountName
 
 }
 
