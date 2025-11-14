@@ -7,19 +7,14 @@ import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Service
 import ru.quipy.common.utils.CallerBlockingRejectedExecutionHandler
-import ru.quipy.common.utils.CompositeRateLimiter
-import ru.quipy.common.utils.LeakingBucketRateLimiter
 import ru.quipy.common.utils.NamedThreadFactory
 import ru.quipy.common.utils.RateLimitExceededException
-import ru.quipy.common.utils.RateLimiter
 import ru.quipy.common.utils.SlidingWindowRateLimiter
-import ru.quipy.common.utils.TokenBucketRateLimiter
 import ru.quipy.core.EventSourcingService
 import ru.quipy.payments.api.PaymentAggregate
 import java.time.Duration
 import java.util.*
 import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.RejectedExecutionHandler
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
@@ -39,10 +34,9 @@ class OrderPayer {
     private val queue = LinkedBlockingQueue<Runnable>(8_000)
 
     private val paymentExecutor = ThreadPoolExecutor(
-        16,
-        16,
-        0L,
-        TimeUnit.MILLISECONDS,
+        200,
+        200,
+        60L, TimeUnit.SECONDS,
         queue,
         NamedThreadFactory("payment-submission-executor"),
         CallerBlockingRejectedExecutionHandler()
@@ -57,7 +51,7 @@ class OrderPayer {
         bucketSize = 35,
         window = Duration.ofSeconds(1)
     )*/
-    private val slidingWindowRateLimiter = SlidingWindowRateLimiter(8, Duration.ofSeconds(1))
+    private val slidingWindowRateLimiter = SlidingWindowRateLimiter(100, Duration.ofSeconds(1))
     init {
         Gauge.builder("payment.executor.queue.size") { queue.size.toDouble() }
             .description("Current number of tasks waiting in payment executor queue")
