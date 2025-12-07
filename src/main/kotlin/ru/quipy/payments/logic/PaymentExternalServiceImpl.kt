@@ -35,6 +35,7 @@ class PaymentExternalSystemAdapterImpl(
         val mapper = ObjectMapper().registerKotlinModule()
     }
 
+    private val scheduler = Executors.newScheduledThreadPool(100)
     private val semaphore = java.util.concurrent.Semaphore(properties.parallelRequests)
     private val serviceName = properties.serviceName
     private val accountName = properties.accountName
@@ -160,8 +161,9 @@ class PaymentExternalSystemAdapterImpl(
                 val remainingTime = deadline - now()
                 val sleepTime = min(currentDelay, remainingTime - 50)
                 if (sleepTime > 0) {
-                    Thread.sleep(sleepTime)
-                    performRequestWithRetry(paymentId, amount, transactionId, paymentStartedAt, deadline, attempt + 1)
+                    scheduleRetry(sleepTime) {
+                        performRequestWithRetry(paymentId, amount, transactionId, paymentStartedAt, deadline, attempt + 1)
+                    }
                 }
             }
 
@@ -187,14 +189,22 @@ class PaymentExternalSystemAdapterImpl(
             val remainingTime = deadline - now()
             val sleepTime = min(currentDelay, remainingTime - 50)
             if (sleepTime > 0) {
-                Thread.sleep(sleepTime)
-                performRequestWithRetry(paymentId, amount, transactionId, paymentStartedAt, deadline, attempt + 1)
+                scheduleRetry(sleepTime) {
+                    performRequestWithRetry(paymentId, amount, transactionId, paymentStartedAt, deadline, attempt + 1)
+                }
             }
         }
     }
 
     private fun exponentialBackoffDelay(attempt: Int): Long {
         return minOf((delayBaseMs * 2.0.pow((attempt - 1).toDouble())).toLong(), maxDelayMs)
+    }
+
+    private fun scheduleRetry(
+        delayMs: Long,
+        task: () -> Unit
+    ) {
+        scheduler.schedule(task, delayMs, TimeUnit.MILLISECONDS)
     }
 
     override fun price() = properties.price
