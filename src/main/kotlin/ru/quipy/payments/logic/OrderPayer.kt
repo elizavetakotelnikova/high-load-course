@@ -31,11 +31,11 @@ class OrderPayer {
     @Autowired
     private lateinit var paymentService: PaymentService
 
-    private val queue = LinkedBlockingQueue<Runnable>(8_000)
+    private val queue = LinkedBlockingQueue<Runnable>(16_000)
 
     private val paymentExecutor = ThreadPoolExecutor(
         200,
-        1200,
+        2000,
         60L, TimeUnit.SECONDS,
         queue,
         NamedThreadFactory("payment-submission-executor"),
@@ -51,7 +51,7 @@ class OrderPayer {
         bucketSize = 35,
         window = Duration.ofSeconds(1)
     )*/
-    private val slidingWindowRateLimiter = SlidingWindowRateLimiter(1100, Duration.ofSeconds(1))
+    private val slidingWindowRateLimiter = SlidingWindowRateLimiter(2000, Duration.ofSeconds(1))
     init {
         Gauge.builder("payment.executor.queue.size") { queue.size.toDouble() }
             .description("Current number of tasks waiting in payment executor queue")
