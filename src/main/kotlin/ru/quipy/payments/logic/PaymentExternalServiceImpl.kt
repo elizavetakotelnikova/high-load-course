@@ -35,7 +35,7 @@ class PaymentExternalSystemAdapterImpl(
         val mapper = ObjectMapper().registerKotlinModule()
     }
 
-    private val scheduler = Executors.newScheduledThreadPool(200)
+    private val scheduler = Executors.newScheduledThreadPool(100)
     private val semaphore = java.util.concurrent.Semaphore(properties.parallelRequests)
     private val serviceName = properties.serviceName
     private val accountName = properties.accountName
@@ -72,7 +72,7 @@ class PaymentExternalSystemAdapterImpl(
         rate = properties.rateLimitPerSec.toLong(),
         window = Duration.ofSeconds(1)
     )
-    private val requestAverageProcessingTime = Duration.ofMillis(1000)
+    private val requestAverageProcessingTime = properties.averageProcessingTime
     private val maxAttempts = 10
     private val maxDelayMs = 20000L
     private val delayBaseMs = 500L
@@ -127,7 +127,6 @@ class PaymentExternalSystemAdapterImpl(
 
         val request = HttpRequest.newBuilder()
             .uri(URI("http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount"))
-            .timeout(Duration.ofMillis(1500))
             .POST(HttpRequest.BodyPublishers.noBody())
             .build()
 
