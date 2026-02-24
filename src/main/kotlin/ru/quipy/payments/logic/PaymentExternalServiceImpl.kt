@@ -35,7 +35,7 @@ class PaymentExternalSystemAdapterImpl(
         val mapper = ObjectMapper().registerKotlinModule()
     }
 
-    private val scheduler = Executors.newScheduledThreadPool(100)
+    private val scheduler = Executors.newScheduledThreadPool(100, Thread.ofVirtual().factory())
     private val semaphore = java.util.concurrent.Semaphore(properties.parallelRequests)
     private val serviceName = properties.serviceName
     private val accountName = properties.accountName
@@ -73,9 +73,9 @@ class PaymentExternalSystemAdapterImpl(
         window = Duration.ofSeconds(1)
     )
     private val requestAverageProcessingTime = properties.averageProcessingTime
-    private val maxAttempts = 3
-    private val maxDelayMs = 500L
-    private val delayBaseMs = 20L
+    private val maxAttempts = 10
+    private val maxDelayMs = 20000L
+    private val delayBaseMs = 500L
 
     override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long) {
         logger.warn("[$accountName] Submitting payment request for payment $paymentId")
