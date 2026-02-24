@@ -35,7 +35,7 @@ class PaymentExternalSystemAdapterImpl(
         val mapper = ObjectMapper().registerKotlinModule()
     }
 
-    private val scheduler = Executors.newScheduledThreadPool(100, Thread.ofVirtual().factory())
+    private val scheduler = Executors.newScheduledThreadPool(100)
     private val semaphore = java.util.concurrent.Semaphore(properties.parallelRequests)
     private val serviceName = properties.serviceName
     private val accountName = properties.accountName
