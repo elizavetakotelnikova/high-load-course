@@ -2,6 +2,9 @@ package ru.quipy.payments.logic
 
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.Metrics
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
@@ -51,7 +54,7 @@ class OrderPayer {
         bucketSize = 35,
         window = Duration.ofSeconds(1)
     )*/
-    private val slidingWindowRateLimiter = SlidingWindowRateLimiter(2000, Duration.ofSeconds(1))
+    private val slidingWindowRateLimiter = SlidingWindowRateLimiter(1100, Duration.ofSeconds(1))
     init {
         Gauge.builder("payment.executor.queue.size") { queue.size.toDouble() }
             .description("Current number of tasks waiting in payment executor queue")
@@ -69,27 +72,28 @@ class OrderPayer {
             .register(Metrics.globalRegistry)
     }
 
+    private val scope = CoroutineScope(Dispatchers.IO)
+
     suspend fun processPayment(orderId: UUID, amount: Int, paymentId: UUID, deadline: Long): Long {
         val createdAt = System.currentTimeMillis()
-        val toBlock = deadline - createdAt
-        if (!slidingWindowRateLimiter.tickBlocking(Duration.ofMillis(toBlock))) {
+
+        if (!slidingWindowRateLimiter.tick()) {
             throw RateLimitExceededException()
         }
-        //val task = bucket.tick {
-            paymentExecutor.submit {
-                val createdEvent = paymentESService.create {
-                    it.create(
-                        paymentId,
-                        orderId,
-                        amount
-                    )
-                }
-                logger.trace("Payment ${createdEvent.paymentId} for order $orderId created.")
 
+        val createdEvent = paymentESService.create {
+            it.create(paymentId, orderId, amount)
+        }
+        logger.trace("Payment ${createdEvent.paymentId} for order $orderId created.")
+
+        scope.launch {
+            try {
                 paymentService.submitPaymentRequest(paymentId, amount, createdAt, deadline)
+            } catch (ex: Exception) {
+                logger.error("Payment submission failed for $paymentId", ex)
             }
-        //}
-        //if (task) return createdAt else throw RateLimitExceededException()
+        }
+
         return createdAt
     }
 }
