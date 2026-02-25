@@ -51,7 +51,7 @@ class OrderPayer {
         bucketSize = 35,
         window = Duration.ofSeconds(1)
     )*/
-    private val slidingWindowRateLimiter = SlidingWindowRateLimiter(4000, Duration.ofSeconds(1))
+    private val slidingWindowRateLimiter = SlidingWindowRateLimiter(2000, Duration.ofSeconds(1))
     init {
         Gauge.builder("payment.executor.queue.size") { queue.size.toDouble() }
             .description("Current number of tasks waiting in payment executor queue")
