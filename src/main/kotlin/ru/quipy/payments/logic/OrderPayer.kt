@@ -34,17 +34,6 @@ class OrderPayer {
     @Autowired
     private lateinit var paymentService: PaymentService
 
-    private val queue = LinkedBlockingQueue<Runnable>(8_000)
-
-    private val paymentExecutor = ThreadPoolExecutor(
-        200,
-        1200,
-        60L, TimeUnit.SECONDS,
-        queue,
-        NamedThreadFactory("payment-submission-executor"),
-        CallerBlockingRejectedExecutionHandler()
-    )
-
     private val rate = 11
     private val waitTime = 13
     // test 2 - 126
@@ -55,22 +44,6 @@ class OrderPayer {
         window = Duration.ofSeconds(1)
     )*/
     private val slidingWindowRateLimiter = SlidingWindowRateLimiter(1100, Duration.ofSeconds(1))
-    init {
-        Gauge.builder("payment.executor.queue.size") { queue.size.toDouble() }
-            .description("Current number of tasks waiting in payment executor queue")
-            .tag("component", "order-payer")
-            .register(Metrics.globalRegistry)
-
-        Gauge.builder("payment.executor.active.count") { paymentExecutor.activeCount.toDouble() }
-            .description("Number of actively executing threads in payment executor")
-            .tag("component", "order-payer")
-            .register(Metrics.globalRegistry)
-
-        Gauge.builder("payment.executor.completed.count") { paymentExecutor.completedTaskCount.toDouble() }
-            .description("Total number of completed tasks by payment executor")
-            .tag("component", "order-payer")
-            .register(Metrics.globalRegistry)
-    }
 
     private val scope = CoroutineScope(Dispatchers.IO)
 
