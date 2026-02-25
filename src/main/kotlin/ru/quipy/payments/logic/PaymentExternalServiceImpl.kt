@@ -161,11 +161,11 @@ class PaymentExternalSystemAdapterImpl(
                 val currentDelay = exponentialBackoffDelay(attempt)
                 val remainingTime = deadline - now()
                 val sleepTime = min(currentDelay, remainingTime - 50)
-                if (sleepTime > 0) {
-                    scheduleRetry(sleepTime) {
-                        performRequestWithRetry(paymentId, amount, transactionId, paymentStartedAt, deadline, attempt + 1)
-                    }
-                }
+//                if (sleepTime > 0) {
+//                    scheduleRetry(sleepTime) {
+//                        performRequestWithRetry(paymentId, amount, transactionId, paymentStartedAt, deadline, attempt + 1)
+//                    }
+//                }
             }
 
         }.exceptionally { ex ->
@@ -189,11 +189,11 @@ class PaymentExternalSystemAdapterImpl(
             val currentDelay = exponentialBackoffDelay(attempt)
             val remainingTime = deadline - now()
             val sleepTime = min(currentDelay, remainingTime - 50)
-            if (sleepTime > 0) {
-                scheduleRetry(sleepTime) {
-                    performRequestWithRetry(paymentId, amount, transactionId, paymentStartedAt, deadline, attempt + 1)
-                }
-            }
+//            if (sleepTime > 0) {
+//                scheduleRetry(sleepTime) {
+//                    performRequestWithRetry(paymentId, amount, transactionId, paymentStartedAt, deadline, attempt + 1)
+//                }
+//            }
         }
     }
 
