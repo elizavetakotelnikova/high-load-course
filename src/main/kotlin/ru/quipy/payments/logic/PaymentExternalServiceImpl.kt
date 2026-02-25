@@ -73,9 +73,9 @@ class PaymentExternalSystemAdapterImpl(
         window = Duration.ofSeconds(1)
     )
     private val requestAverageProcessingTime = properties.averageProcessingTime
-    private val maxAttempts = 10
-    private val maxDelayMs = 20000L
-    private val delayBaseMs = 500L
+    private val maxAttempts = 3
+    private val maxDelayMs = 1000L
+    private val delayBaseMs = 50L
 
     override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long) {
         logger.warn("[$accountName] Submitting payment request for payment $paymentId")
@@ -127,6 +127,7 @@ class PaymentExternalSystemAdapterImpl(
 
         val request = HttpRequest.newBuilder()
             .uri(URI("http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount"))
+            .timeout(Duration.ofMillis(150))
             .POST(HttpRequest.BodyPublishers.noBody())
             .build()
 
