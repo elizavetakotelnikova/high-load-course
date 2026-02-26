@@ -17,6 +17,7 @@ import java.net.http.HttpResponse
 import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import kotlin.math.min
 import kotlin.math.pow
@@ -35,6 +36,8 @@ class PaymentExternalSystemAdapterImpl(
         val mapper = ObjectMapper().registerKotlinModule()
     }
 
+    private val batchSize = 10
+    private val updateQueue = LinkedBlockingQueue<() -> Unit>()
     private val esExecutor = Executors.newFixedThreadPool(32)
     private val scheduler = Executors.newScheduledThreadPool(100)
     private val semaphore = java.util.concurrent.Semaphore(properties.parallelRequests)
@@ -77,6 +80,15 @@ class PaymentExternalSystemAdapterImpl(
     private val maxAttempts = 3
     private val maxDelayMs = 1000L
     private val delayBaseMs = 50L
+
+    init {
+        scheduler.scheduleWithFixedDelay(
+            { flushUpdates() },
+            5,
+            5,
+            TimeUnit.MILLISECONDS
+        )
+    }
 
     override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long) {
         logger.warn("[$accountName] Submitting payment request for payment $paymentId")
@@ -169,14 +181,6 @@ class PaymentExternalSystemAdapterImpl(
                     paymentRetryCounter.increment()
                 }
                 semaphore.release()
-                val currentDelay = exponentialBackoffDelay(attempt)
-                val remainingTime = deadline - now()
-                val sleepTime = min(currentDelay, remainingTime - 50)
-//                if (sleepTime > 0) {
-//                    scheduleRetry(sleepTime) {
-//                        performRequestWithRetry(paymentId, amount, transactionId, paymentStartedAt, deadline, attempt + 1)
-//                    }
-//                }
             }
 
         }.exceptionally { ex ->
@@ -201,14 +205,15 @@ class PaymentExternalSystemAdapterImpl(
             if (attempt > 1) {
                 paymentRetryCounter.increment()
             }
-            val currentDelay = exponentialBackoffDelay(attempt)
-            val remainingTime = deadline - now()
-            val sleepTime = min(currentDelay, remainingTime - 50)
-//            if (sleepTime > 0) {
-//                scheduleRetry(sleepTime) {
-//                    performRequestWithRetry(paymentId, amount, transactionId, paymentStartedAt, deadline, attempt + 1)
-//                }
-//            }
+        }
+    }
+
+    private fun flushUpdates() {
+        val batch = ArrayList<() -> Unit>(batchSize)
+        updateQueue.drainTo(batch, batchSize)
+        if (batch.isEmpty()) return
+        esExecutor.submit {
+            batch.forEach { it.invoke() }
         }
     }
 
@@ -217,7 +222,7 @@ class PaymentExternalSystemAdapterImpl(
     }
 
     private fun updateAsync(task: () -> Unit) {
-        esExecutor.submit(task)
+        updateQueue.offer(task)
     }
 
     private fun scheduleRetry(
