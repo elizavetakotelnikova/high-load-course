@@ -54,10 +54,10 @@ class OrderPayer {
             throw RateLimitExceededException()
         }
 
-//        val createdEvent = paymentESService.create {
-//            it.create(paymentId, orderId, amount)
-//        }
-//        logger.trace("Payment ${createdEvent.paymentId} for order $orderId created.")
+        val createdEvent = paymentESService.create {
+            it.create(paymentId, orderId, amount)
+        }
+        logger.trace("Payment ${createdEvent.paymentId} for order $orderId created.")
 
         scope.launch {
             try {
