@@ -99,7 +99,7 @@ class PaymentExternalSystemAdapterImpl(
         deadline: Long,
         attempt: Int
     ) {
-        if (now() + requestAverageProcessingTime.toMillis() > deadline || attempt > maxAttempts) {
+        if (attempt > maxAttempts) {
             paymentErrorCounter.increment()
             paymentESService.update(paymentId) {
                 it.logProcessing(false, now(), transactionId, reason = "Deadline exceeded or max attempts reached")
