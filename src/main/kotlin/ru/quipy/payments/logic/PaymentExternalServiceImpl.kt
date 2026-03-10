@@ -2,6 +2,8 @@ package ru.quipy.payments.logic
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import io.github.resilience4j.circuitbreaker.CircuitBreaker
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.Metrics
 import io.micrometer.core.instrument.Timer
@@ -78,6 +80,20 @@ class PaymentExternalSystemAdapterImpl(
     )
     private val requestAverageProcessingTime = properties.averageProcessingTime
 
+    private val circuitBreaker = CircuitBreaker.of(
+        accountName,
+        CircuitBreakerConfig.custom()
+            .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.TIME_BASED)
+            .slidingWindowSize(5)
+            .minimumNumberOfCalls(50)
+            .failureRateThreshold(50f)
+            .slowCallRateThreshold(50f)
+            .slowCallDurationThreshold(Duration.ofMillis(300))
+            .waitDurationInOpenState(Duration.ofSeconds(2))
+            .permittedNumberOfCallsInHalfOpenState(20)
+            .build()
+    )
+
     override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long) {
         logger.warn("[$accountName] Submitting payment request for payment $paymentId")
         val transactionId = UUID.randomUUID()
@@ -98,6 +114,14 @@ class PaymentExternalSystemAdapterImpl(
         paymentStartedAt: Long,
         deadline: Long
     ) {
+        if (!circuitBreaker.tryAcquirePermission()) {
+            paymentErrorCounter.increment()
+            paymentESService.update(paymentId) {
+                it.logProcessing(false, now(), transactionId, reason = "Circuit breaker open")
+            }
+            return
+        }
+
         if (!slidingWindowRateLimiter.tickBlocking(Duration.ofMillis(deadline - now()))) {
             paymentErrorCounter.increment()
             paymentESService.update(paymentId) {
@@ -160,14 +184,19 @@ class PaymentExternalSystemAdapterImpl(
                     it.logProcessing(body.result, now(), transactionId, reason = body.message)
                 }
 
-            if (body.result) {
-                paymentSuccessCounter.increment()
-                semaphore.release()
-            } else {
-                paymentErrorCounter.increment()
-                semaphore.release()
-            }
+                val duration = now() - startTime
+                if (body.result) {
+                    circuitBreaker.onSuccess(duration, TimeUnit.MILLISECONDS)
+                    paymentSuccessCounter.increment()
+                    semaphore.release()
+                } else {
+                    circuitBreaker.onError(duration, TimeUnit.MILLISECONDS, RuntimeException("Payment failed"))
+                    paymentErrorCounter.increment()
+                    semaphore.release()
+                }
         }.exceptionally { ex ->
+                val duration = now() - startTime
+                circuitBreaker.onError(duration, TimeUnit.MILLISECONDS, ex)
                 when (ex) {
                     is SocketTimeoutException -> {
                         logger.error("[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId", ex)
