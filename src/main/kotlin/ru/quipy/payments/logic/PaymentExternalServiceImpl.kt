@@ -40,7 +40,7 @@ class PaymentExternalSystemAdapterImpl(
     private val semaphore = java.util.concurrent.Semaphore(properties.parallelRequests)
     private val serviceName = properties.serviceName
     private val accountName = properties.accountName
-    private val retryAmount = 2
+    private val retryAmount = 0
     private val paymentRequestsCounter = Counter.builder("payment.requests.incoming")
         .description("Total payment requests received by adapter")
         .tag("adapter", "payment")
@@ -73,7 +73,7 @@ class PaymentExternalSystemAdapterImpl(
 
     val timeoutTime = properties.averageProcessingTime.toMillis() * 2
     val hedgeDelayMs = 160L
-    val requestTimeoutMs = 1500L
+    val requestTimeoutMs = 300L
     val slidingWindowRateLimiter = SlidingWindowRateLimiter(
         rate = properties.rateLimitPerSec.toLong(),
         window = Duration.ofSeconds(1)
@@ -84,12 +84,12 @@ class PaymentExternalSystemAdapterImpl(
         accountName,
         CircuitBreakerConfig.custom()
             .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.TIME_BASED)
-            .slidingWindowSize(5)
-            .minimumNumberOfCalls(50)
+            .slidingWindowSize(100)
+            .minimumNumberOfCalls(10)
             .failureRateThreshold(50f)
             .slowCallRateThreshold(50f)
-            .slowCallDurationThreshold(Duration.ofMillis(300))
-            .waitDurationInOpenState(Duration.ofSeconds(2))
+            .slowCallDurationThreshold(Duration.ofMillis(500))
+            .waitDurationInOpenState(Duration.ofSeconds(5))
             .permittedNumberOfCallsInHalfOpenState(20)
             .build()
     )
