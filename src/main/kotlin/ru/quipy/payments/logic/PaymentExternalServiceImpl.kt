@@ -67,7 +67,7 @@ class PaymentExternalSystemAdapterImpl(
         .register(Metrics.globalRegistry)
 
     private val http2Client = HttpClient.newBuilder()
-        .executor(Executors.newFixedThreadPool(128))
+        .executor(Executors.newFixedThreadPool(256))
         .version(HttpClient.Version.HTTP_2)
         .build()
 
@@ -84,12 +84,12 @@ class PaymentExternalSystemAdapterImpl(
         accountName,
         CircuitBreakerConfig.custom()
             .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.TIME_BASED)
-            .slidingWindowSize(25)
-            .minimumNumberOfCalls(60)
+            .slidingWindowSize(30)
+            .minimumNumberOfCalls(40)
             .failureRateThreshold(55f)
             .slowCallRateThreshold(72f)
-            .slowCallDurationThreshold(Duration.ofMillis(2200))
-            .waitDurationInOpenState(Duration.ofSeconds(5))
+            .slowCallDurationThreshold(Duration.ofMillis(1000))
+            .waitDurationInOpenState(Duration.ofSeconds(3))
             .permittedNumberOfCallsInHalfOpenState(10)
             .build()
     )
