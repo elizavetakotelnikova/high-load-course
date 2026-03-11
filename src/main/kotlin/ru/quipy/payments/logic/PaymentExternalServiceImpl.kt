@@ -40,7 +40,7 @@ class PaymentExternalSystemAdapterImpl(
     private val semaphore = java.util.concurrent.Semaphore(properties.parallelRequests)
     private val serviceName = properties.serviceName
     private val accountName = properties.accountName
-    private val retryAmount = 1
+    private val retryAmount = 0
     private val paymentRequestsCounter = Counter.builder("payment.requests.incoming")
         .description("Total payment requests received by adapter")
         .tag("adapter", "payment")
