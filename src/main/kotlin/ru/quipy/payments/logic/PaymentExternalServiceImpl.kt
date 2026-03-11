@@ -37,7 +37,7 @@ class PaymentExternalSystemAdapterImpl(
     }
 
     private val scheduler = Executors.newScheduledThreadPool(100)
-    private val semaphore = java.util.concurrent.Semaphore(properties.parallelRequests)
+    private val semaphore = java.util.concurrent.Semaphore(500)
     private val serviceName = properties.serviceName
     private val accountName = properties.accountName
     private val retryAmount = 0
@@ -72,8 +72,8 @@ class PaymentExternalSystemAdapterImpl(
         .build()
 
     val timeoutTime = properties.averageProcessingTime.toMillis() * 2
-    val hedgeDelayMs = 700L
-    val requestTimeoutMs = 2500L
+    val hedgeDelayMs = 160L
+    val requestTimeoutMs = 300L
     val slidingWindowRateLimiter = SlidingWindowRateLimiter(
         rate = properties.rateLimitPerSec.toLong(),
         window = Duration.ofSeconds(1)
