@@ -23,10 +23,13 @@ class PaymentSystemImpl(
     companion object {
         val logger = LoggerFactory.getLogger(PaymentSystemImpl::class.java)
     }
+    private val scope = CoroutineScope(Dispatchers.IO)
 
     override fun submitPaymentRequest(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long) {
-        for (account in paymentAccounts) {
-            account.performPaymentAsync(paymentId, amount, paymentStartedAt, deadline)
+        paymentAccounts.forEach { account ->
+            scope.launch {
+                account.performPaymentAsync(paymentId, amount, paymentStartedAt, deadline)
+            }
         }
     }
 }
