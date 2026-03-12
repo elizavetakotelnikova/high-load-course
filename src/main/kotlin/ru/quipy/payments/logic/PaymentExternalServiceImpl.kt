@@ -67,7 +67,7 @@ class PaymentExternalSystemAdapterImpl(
         .register(Metrics.globalRegistry)
 
     private val http2Client = HttpClient.newBuilder()
-        .executor(Executors.newFixedThreadPool(256))
+        .executor(Executors.newFixedThreadPool(128))
         .version(HttpClient.Version.HTTP_2)
         .build()
 
@@ -90,7 +90,7 @@ class PaymentExternalSystemAdapterImpl(
             .slowCallRateThreshold(65f)
             .slowCallDurationThreshold(Duration.ofMillis(1800))
             .waitDurationInOpenState(Duration.ofSeconds(4))
-            .permittedNumberOfCallsInHalfOpenState(10)
+            .permittedNumberOfCallsInHalfOpenState(6)
             .build()
     )
 
