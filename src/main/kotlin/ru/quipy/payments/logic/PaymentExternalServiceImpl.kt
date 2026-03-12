@@ -114,14 +114,6 @@ class PaymentExternalSystemAdapterImpl(
         paymentStartedAt: Long,
         deadline: Long
     ) {
-        if (!circuitBreaker.tryAcquirePermission()) {
-            paymentErrorCounter.increment()
-            paymentESService.update(paymentId) {
-                it.logProcessing(false, now(), transactionId, reason = "Circuit breaker open")
-            }
-            return
-        }
-
         if (!slidingWindowRateLimiter.tickBlocking(Duration.ofMillis(deadline - now()))) {
             paymentErrorCounter.increment()
             paymentESService.update(paymentId) {
@@ -140,6 +132,14 @@ class PaymentExternalSystemAdapterImpl(
             }
             return
         }
+        if (!circuitBreaker.tryAcquirePermission()) {
+            paymentErrorCounter.increment()
+            paymentESService.update(paymentId) {
+                it.logProcessing(false, now(), transactionId, reason = "Circuit breaker open")
+            }
+            return
+        }
+
 
         val idempotencyKey = transactionId.toString()
         fun createRequest(): HttpRequest = HttpRequest.newBuilder()
@@ -213,6 +213,8 @@ class PaymentExternalSystemAdapterImpl(
                     }
                 }
                 requestLatency.record(now() - startTime, TimeUnit.MILLISECONDS)
+
+                semaphore.release()
             }
     }
 
