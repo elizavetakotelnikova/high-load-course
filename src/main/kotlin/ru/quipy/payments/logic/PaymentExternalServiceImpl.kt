@@ -73,7 +73,7 @@ class PaymentExternalSystemAdapterImpl(
 
     val timeoutTime = properties.averageProcessingTime.toMillis() * 2
     val hedgeDelayMs = 160L
-    val requestTimeoutMs = 300L
+    val requestTimeoutMs = 250L
     val slidingWindowRateLimiter = SlidingWindowRateLimiter(
         rate = properties.rateLimitPerSec.toLong(),
         window = Duration.ofSeconds(1)
@@ -84,13 +84,13 @@ class PaymentExternalSystemAdapterImpl(
         accountName,
         CircuitBreakerConfig.custom()
             .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.TIME_BASED)
-            .slidingWindowSize(20)
+            .slidingWindowSize(18)
             .minimumNumberOfCalls(60)
             .failureRateThreshold(55f)
-            .slowCallRateThreshold(65f)
-            .slowCallDurationThreshold(Duration.ofMillis(1800))
-            .waitDurationInOpenState(Duration.ofSeconds(4))
-            .permittedNumberOfCallsInHalfOpenState(6)
+            .slowCallRateThreshold(63f)
+            .slowCallDurationThreshold(Duration.ofMillis(1700))
+            .waitDurationInOpenState(Duration.ofSeconds(3))
+            .permittedNumberOfCallsInHalfOpenState(12)
             .build()
     )
 
