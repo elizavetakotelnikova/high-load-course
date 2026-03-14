@@ -20,7 +20,6 @@ import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.CompletableFuture
 
 
 // Advice: always treat time as a Duration
@@ -40,7 +39,7 @@ class PaymentExternalSystemAdapterImpl(
     private val semaphore = java.util.concurrent.Semaphore(properties.parallelRequests)
     private val serviceName = properties.serviceName
     private val accountName = properties.accountName
-    private val retryAmount = 3
+    private val retryAmount = 2
     private val paymentRequestsCounter = Counter.builder("payment.requests.incoming")
         .description("Total payment requests received by adapter")
         .tag("adapter", "payment")
@@ -132,14 +131,6 @@ class PaymentExternalSystemAdapterImpl(
             }
             return
         }
-        if (!circuitBreaker.tryAcquirePermission()) {
-            paymentErrorCounter.increment()
-            paymentESService.update(paymentId) {
-                it.logProcessing(false, now(), transactionId, reason = "Circuit breaker open")
-            }
-            return
-        }
-
 
         val idempotencyKey = transactionId.toString()
         fun createRequest(): HttpRequest = HttpRequest.newBuilder()
@@ -150,21 +141,13 @@ class PaymentExternalSystemAdapterImpl(
             .build()
 
         val startTime = now()
-        val futures = mutableListOf<CompletableFuture<HttpResponse<String>>>()
-        futures.add(http2Client.sendAsync(createRequest(), HttpResponse.BodyHandlers.ofString()))
 
-        for (i in 1..retryAmount) {
-            scheduler.schedule({
-                if (futures.any { it.isDone }) return@schedule
-                hedgeTriggeredCounter.increment()
-                futures.add(http2Client.sendAsync(createRequest(), HttpResponse.BodyHandlers.ofString()))
-            }, hedgeDelayMs * i, TimeUnit.MILLISECONDS)
+        val decoratedCall = circuitBreaker.decorateCompletionStage {
+            http2Client.sendAsync(createRequest(), HttpResponse.BodyHandlers.ofString())
         }
 
-        CompletableFuture.anyOf(*futures.toTypedArray())
-            .thenApply { winner ->
-                winner as? HttpResponse<String> ?: throw RuntimeException("No response received")
-            }
+        decoratedCall
+            .get()
             .thenApply { response ->
                 val body = try {
                     mapper.readValue(response.body(), ExternalSysResponse::class.java)
@@ -173,7 +156,7 @@ class PaymentExternalSystemAdapterImpl(
                     ExternalSysResponse(transactionId.toString(), paymentId.toString(), false, e.message)
                 }
 
-                logger.warn("[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, succeeded: ${body.result}, message: ${body.message}")
+                logger.warn("[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, succeeded: ${body.result}")
 
                 paymentRequestsCounter.increment()
                 requestLatency.record(now() - startTime, TimeUnit.MILLISECONDS)
@@ -184,17 +167,15 @@ class PaymentExternalSystemAdapterImpl(
                     it.logProcessing(body.result, now(), transactionId, reason = body.message)
                 }
 
-                val duration = now() - startTime
                 if (body.result) {
-                    circuitBreaker.onSuccess(duration, TimeUnit.MILLISECONDS)
                     paymentSuccessCounter.increment()
-                    semaphore.release()
                 } else {
-                    circuitBreaker.onError(duration, TimeUnit.MILLISECONDS, RuntimeException("Payment failed"))
                     paymentErrorCounter.increment()
-                    semaphore.release()
                 }
-        }.exceptionally { ex ->
+                semaphore.release()
+                body
+            }
+            .exceptionally { ex ->
                 val duration = now() - startTime
                 circuitBreaker.onError(duration, TimeUnit.MILLISECONDS, ex)
                 when (ex) {
@@ -215,6 +196,7 @@ class PaymentExternalSystemAdapterImpl(
                 requestLatency.record(now() - startTime, TimeUnit.MILLISECONDS)
 
                 semaphore.release()
+                throw ex
             }
     }
 

@@ -50,9 +50,9 @@ class OrderPayer {
     suspend fun processPayment(orderId: UUID, amount: Int, paymentId: UUID, deadline: Long): Long {
         val createdAt = System.currentTimeMillis()
 
-//        if (!slidingWindowRateLimiter.tick()) {
-//            throw RateLimitExceededException()
-//        }
+        if (!slidingWindowRateLimiter.tick()) {
+            throw RateLimitExceededException()
+        }
 
         val createdEvent = paymentESService.create {
             it.create(paymentId, orderId, amount)
