@@ -40,7 +40,7 @@ class PaymentExternalSystemAdapterImpl(
     private val semaphore = java.util.concurrent.Semaphore(properties.parallelRequests)
     private val serviceName = properties.serviceName
     private val accountName = properties.accountName
-    private val retryAmount = 0
+    private val retryAmount = 2
     private val paymentRequestsCounter = Counter.builder("payment.requests.incoming")
         .description("Total payment requests received by adapter")
         .tag("adapter", "payment")
@@ -88,7 +88,7 @@ class PaymentExternalSystemAdapterImpl(
             .minimumNumberOfCalls(20)
             .failureRateThreshold(50f)
             .slowCallRateThreshold(50f)
-            .slowCallDurationThreshold(Duration.ofMillis(300))
+            .slowCallDurationThreshold(Duration.ofMillis(500))
             .waitDurationInOpenState(Duration.ofSeconds(2))
             .permittedNumberOfCallsInHalfOpenState(5)
             .build()
