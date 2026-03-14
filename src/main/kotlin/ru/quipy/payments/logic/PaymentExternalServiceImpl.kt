@@ -86,10 +86,7 @@ class PaymentExternalSystemAdapterImpl(
             .slidingWindowSize(20)
             .minimumNumberOfCalls(60)
             .failureRateThreshold(55f)
-            .slowCallRateThreshold(65f)
-            .slowCallDurationThreshold(Duration.ofMillis(1800))
             .waitDurationInOpenState(Duration.ofSeconds(4))
-            .permittedNumberOfCallsInHalfOpenState(6)
             .build()
     )
 
