@@ -40,7 +40,7 @@ class PaymentExternalSystemAdapterImpl(
     private val semaphore = java.util.concurrent.Semaphore(properties.parallelRequests)
     private val serviceName = properties.serviceName
     private val accountName = properties.accountName
-    private val retryAmount = 2
+    private val retryAmount = 3
     private val paymentRequestsCounter = Counter.builder("payment.requests.incoming")
         .description("Total payment requests received by adapter")
         .tag("adapter", "payment")
@@ -84,13 +84,13 @@ class PaymentExternalSystemAdapterImpl(
         accountName,
         CircuitBreakerConfig.custom()
             .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.TIME_BASED)
-            .slidingWindowSize(10)
-            .minimumNumberOfCalls(20)
-            .failureRateThreshold(50f)
-            .slowCallRateThreshold(50f)
-            .slowCallDurationThreshold(Duration.ofMillis(500))
-            .waitDurationInOpenState(Duration.ofSeconds(1))
-            .permittedNumberOfCallsInHalfOpenState(10)
+            .slidingWindowSize(20)
+            .minimumNumberOfCalls(60)
+            .failureRateThreshold(55f)
+            .slowCallRateThreshold(65f)
+            .slowCallDurationThreshold(Duration.ofMillis(1800))
+            .waitDurationInOpenState(Duration.ofSeconds(4))
+            .permittedNumberOfCallsInHalfOpenState(6)
             .build()
     )
 
