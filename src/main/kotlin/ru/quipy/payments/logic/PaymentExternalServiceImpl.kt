@@ -18,6 +18,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -129,6 +130,14 @@ class PaymentExternalSystemAdapterImpl(
             }
             return
         }
+        if (!circuitBreaker.tryAcquirePermission()) {
+            paymentErrorCounter.increment()
+            paymentESService.update(paymentId) {
+                it.logProcessing(false, now(), transactionId, reason = "Circuit breaker open")
+            }
+            return
+        }
+
 
         val idempotencyKey = transactionId.toString()
         fun createRequest(): HttpRequest = HttpRequest.newBuilder()
@@ -139,13 +148,21 @@ class PaymentExternalSystemAdapterImpl(
             .build()
 
         val startTime = now()
+        val futures = mutableListOf<CompletableFuture<HttpResponse<String>>>()
+        futures.add(http2Client.sendAsync(createRequest(), HttpResponse.BodyHandlers.ofString()))
 
-        val decoratedCall = circuitBreaker.decorateCompletionStage {
-            http2Client.sendAsync(createRequest(), HttpResponse.BodyHandlers.ofString())
+        for (i in 1..retryAmount) {
+            scheduler.schedule({
+                if (futures.any { it.isDone }) return@schedule
+                hedgeTriggeredCounter.increment()
+                futures.add(http2Client.sendAsync(createRequest(), HttpResponse.BodyHandlers.ofString()))
+            }, hedgeDelayMs * i, TimeUnit.MILLISECONDS)
         }
 
-        decoratedCall
-            .get()
+        CompletableFuture.anyOf(*futures.toTypedArray())
+            .thenApply { winner ->
+                winner as? HttpResponse<String> ?: throw RuntimeException("No response received")
+            }
             .thenApply { response ->
                 val body = try {
                     mapper.readValue(response.body(), ExternalSysResponse::class.java)
@@ -154,7 +171,7 @@ class PaymentExternalSystemAdapterImpl(
                     ExternalSysResponse(transactionId.toString(), paymentId.toString(), false, e.message)
                 }
 
-                logger.warn("[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, succeeded: ${body.result}")
+                logger.warn("[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, succeeded: ${body.result}, message: ${body.message}")
 
                 paymentRequestsCounter.increment()
                 requestLatency.record(now() - startTime, TimeUnit.MILLISECONDS)
@@ -165,15 +182,17 @@ class PaymentExternalSystemAdapterImpl(
                     it.logProcessing(body.result, now(), transactionId, reason = body.message)
                 }
 
+                val duration = now() - startTime
                 if (body.result) {
+                    circuitBreaker.onSuccess(duration, TimeUnit.MILLISECONDS)
                     paymentSuccessCounter.increment()
+                    semaphore.release()
                 } else {
+                    circuitBreaker.onError(duration, TimeUnit.MILLISECONDS, RuntimeException("Payment failed"))
                     paymentErrorCounter.increment()
+                    semaphore.release()
                 }
-                semaphore.release()
-                body
-            }
-            .exceptionally { ex ->
+            }.exceptionally { ex ->
                 val duration = now() - startTime
                 circuitBreaker.onError(duration, TimeUnit.MILLISECONDS, ex)
                 when (ex) {
@@ -194,7 +213,6 @@ class PaymentExternalSystemAdapterImpl(
                 requestLatency.record(now() - startTime, TimeUnit.MILLISECONDS)
 
                 semaphore.release()
-                throw ex
             }
     }
 
