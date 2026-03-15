@@ -2,6 +2,9 @@ package ru.quipy.payments.logic
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException
+import io.github.resilience4j.circuitbreaker.CircuitBreaker
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.Metrics
 import io.micrometer.core.instrument.Timer
@@ -78,6 +81,20 @@ class PaymentExternalSystemAdapterImpl(
     private val maxDelayMs = 100L
     private val delayBaseMs = 5L
 
+    private val circuitBreaker = CircuitBreaker.of(
+        accountName,
+        CircuitBreakerConfig.custom()
+            .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.TIME_BASED)
+            .slidingWindowSize(20)
+            .minimumNumberOfCalls(60)
+            .failureRateThreshold(55f)
+            .slowCallRateThreshold(65f)
+            .slowCallDurationThreshold(Duration.ofMillis(1800))
+            .waitDurationInOpenState(Duration.ofSeconds(4))
+            .permittedNumberOfCallsInHalfOpenState(6)
+            .build()
+    )
+
     override fun performPaymentAsync(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long) {
         logger.warn("[$accountName] Submitting payment request for payment $paymentId")
         val transactionId = UUID.randomUUID()
@@ -128,75 +145,77 @@ class PaymentExternalSystemAdapterImpl(
 
         val request = HttpRequest.newBuilder()
             .uri(URI("http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount"))
-            .timeout(Duration.ofMillis(250))
+            .timeout(Duration.ofMillis(1700))
             .POST(HttpRequest.BodyPublishers.noBody())
             .build()
 
         val startTime = now()
-        http2Client.sendAsync(request, HttpResponse.BodyHandlers.ofString()).thenApply { response ->
-            val body = try {
-                mapper.readValue(response.body(), ExternalSysResponse::class.java)
-            } catch (e: Exception) {
-                logger.error("[$accountName] [ERROR] Payment processed for txId: $transactionId, payment: $paymentId, result code: ${response.statusCode()}, reason: ${response.body()}")
-                ExternalSysResponse(transactionId.toString(), paymentId.toString(), false, e.message)
-            }
-            logger.warn("[$accountName] Payment processed for txId: $transactionId, payment: $paymentId, succeeded: ${body.result}, message: ${body.message}")
-            paymentRequestsCounter.increment()
-            requestLatency.record(now() - startTime, TimeUnit.MILLISECONDS)
 
-            // Здесь мы обновляем состояние оплаты в зависимости от результата в базе данных оплат.
-            // Это требуется сделать ВО ВСЕХ ИСХОДАХ (успешная оплата / неуспешная / ошибочная ситуация)
-            paymentESService.update(paymentId) {
-                it.logProcessing(body.result, now(), transactionId, reason = body.message)
-            }
-
-            if (body.result) {
-                paymentSuccessCounter.increment()
-                semaphore.release()
-            } else {
-                paymentErrorCounter.increment()
-                if (attempt > 1) {
-                    paymentRetryCounter.increment()
-                }
-                semaphore.release()
-                val currentDelay = exponentialBackoffDelay(attempt)
-                val remainingTime = deadline - now()
-                val sleepTime = min(currentDelay, remainingTime - 50)
-                if (sleepTime > 0) {
-                    scheduleRetry(sleepTime) {
-                        performRequestWithRetry(paymentId, amount, transactionId, paymentStartedAt, deadline, attempt + 1)
-                    }
-                }
-            }
-
-        }.exceptionally { ex ->
-            when (ex) {
-                is SocketTimeoutException -> {
-                    logger.error("[$accountName] Payment timeout for txId: $transactionId, payment: $paymentId", ex)
-                    paymentESService.update(paymentId) {
-                        it.logProcessing(false, now(), transactionId, reason = "Request timeout.")
-                    }
-                }
-                else -> {
-                    logger.error("[$accountName] Payment failed for txId: $transactionId, payment: $paymentId", ex)
-                    paymentESService.update(paymentId) {
-                        it.logProcessing(false, now(), transactionId, reason = ex.message)
-                    }
-                }
-            }
-            if (attempt > 1) {
-                paymentRetryCounter.increment()
-            }
-            requestLatency.record(now() - startTime, TimeUnit.MILLISECONDS)
-            val currentDelay = exponentialBackoffDelay(attempt)
-            val remainingTime = deadline - now()
-            val sleepTime = min(currentDelay, remainingTime - 50)
-            if (sleepTime > 0) {
-                scheduleRetry(sleepTime) {
-                    performRequestWithRetry(paymentId, amount, transactionId, paymentStartedAt, deadline, attempt + 1)
-                }
-            }
+        val decoratedFuture = circuitBreaker.decorateCompletionStage {
+            http2Client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
         }
+
+        decoratedFuture
+            .get()
+            .thenApply { response ->
+                val body = try {
+                    mapper.readValue(response.body(), ExternalSysResponse::class.java)
+                } catch (e: Exception) {
+                    ExternalSysResponse(transactionId.toString(), paymentId.toString(), false, e.message)
+                }
+
+                logger.warn("[$accountName] Payment processed txId=$transactionId success=${body.result}")
+
+                paymentRequestsCounter.increment()
+                requestLatency.record(now() - startTime, TimeUnit.MILLISECONDS)
+
+                paymentESService.update(paymentId) {
+                    it.logProcessing(body.result, now(), transactionId, reason = body.message)
+                }
+
+                if (body.result) {
+                    paymentSuccessCounter.increment()
+                } else {
+                    paymentErrorCounter.increment()
+                }
+                semaphore.release()
+            }
+            .exceptionally { ex ->
+                val duration = now() - startTime
+                requestLatency.record(duration, TimeUnit.MILLISECONDS)
+
+                when (ex) {
+                    is CallNotPermittedException -> {
+                        logger.warn("[$accountName] Circuit breaker OPEN for $paymentId")
+                        paymentESService.update(paymentId) {
+                            it.logProcessing(false, now(), transactionId, reason = "Circuit breaker open")
+                        }
+                    }
+                    is SocketTimeoutException -> {
+                        paymentESService.update(paymentId) {
+                            it.logProcessing(false, now(), transactionId, reason = "Request timeout")
+                        }
+                    }
+                    else -> {
+                        paymentESService.update(paymentId) {
+                            it.logProcessing(false, now(), transactionId, reason = ex.message)
+                        }
+                    }
+                }
+                paymentErrorCounter.increment()
+                semaphore.release()
+
+                if (ex !is CallNotPermittedException && attempt < maxAttempts) {
+                    val delay = exponentialBackoffDelay(attempt)
+                    val remaining = deadline - now()
+                    if (remaining > delay + 50) {
+                        scheduleRetry(delay) {
+                            performRequestWithRetry(paymentId, amount, transactionId, paymentStartedAt, deadline, attempt + 1)
+                        }
+                    }
+                }
+                null
+            }
     }
 
     private fun exponentialBackoffDelay(attempt: Int): Long {

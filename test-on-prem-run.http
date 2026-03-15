@@ -6,13 +6,13 @@ Content-Type: application/json
 {
   "serviceName": "{{serviceName}}",
   "token": "{{token}}",
-  "branch": "main",
-  "accounts": "acc-22",
+  "branch": "hw-12-retry",
+  "accounts": "acc-19",
   "ratePerSecond": 100,
-  "testCount": 20000,
-  "processingTimeMillis": 1500
-  "onPremises": true
+  "testCount": 50000,
+  "processingTimeMillis": 10000000
 }
+
 
 ### Stop running test to save credits
 # @timeout 120
