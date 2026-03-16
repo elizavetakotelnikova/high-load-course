@@ -85,10 +85,9 @@ class PaymentExternalSystemAdapterImpl(
         accountName,
         CircuitBreakerConfig.custom()
             .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.TIME_BASED)
-            .slidingWindowSize(20)
-            .minimumNumberOfCalls(60)
-            .failureRateThreshold(55f)
-            .slowCallRateThreshold(65f)
+            .slidingWindowSize(2)
+            .failureRateThreshold(50f)
+            .slowCallRateThreshold(50f)
             .slowCallDurationThreshold(Duration.ofMillis(1800))
             .waitDurationInOpenState(Duration.ofSeconds(4))
             .permittedNumberOfCallsInHalfOpenState(6)
@@ -145,7 +144,7 @@ class PaymentExternalSystemAdapterImpl(
 
         val request = HttpRequest.newBuilder()
             .uri(URI("http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount"))
-            .timeout(Duration.ofMillis(1700))
+            .timeout(Duration.ofMillis(400))
             .POST(HttpRequest.BodyPublishers.noBody())
             .build()
 
@@ -205,7 +204,7 @@ class PaymentExternalSystemAdapterImpl(
                 paymentErrorCounter.increment()
                 semaphore.release()
 
-                if (ex !is CallNotPermittedException && attempt < maxAttempts) {
+                if (attempt < maxAttempts) {
                     val delay = exponentialBackoffDelay(attempt)
                     val remaining = deadline - now()
                     if (remaining > delay + 50) {
