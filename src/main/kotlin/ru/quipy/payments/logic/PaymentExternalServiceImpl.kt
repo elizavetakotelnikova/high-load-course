@@ -77,18 +77,17 @@ class PaymentExternalSystemAdapterImpl(
     )
     private val requestAverageProcessingTime = properties.averageProcessingTime
     private val maxAttempts = 3
-    private val maxDelayMs = 500L
-    private val delayBaseMs = 40L
+    private val maxDelayMs = 3000L
+    private val delayBaseMs = 200L
 
     private val circuitBreaker = CircuitBreaker.of(
         accountName,
         CircuitBreakerConfig.custom()
             .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.TIME_BASED)
             .slidingWindowSize(20)
-            .minimumNumberOfCalls(50)
             .failureRateThreshold(60f)
             .slowCallRateThreshold(70f)
-            .slowCallDurationThreshold(Duration.ofMillis(1800))
+            .slowCallDurationThreshold(Duration.ofMillis(500))
             .waitDurationInOpenState(Duration.ofSeconds(4))
             .permittedNumberOfCallsInHalfOpenState(10)
             .build()
