@@ -77,19 +77,20 @@ class PaymentExternalSystemAdapterImpl(
     )
     private val requestAverageProcessingTime = properties.averageProcessingTime
     private val maxAttempts = 3
-    private val maxDelayMs = 3000L
-    private val delayBaseMs = 200L
+    private val maxDelayMs = 100L
+    private val delayBaseMs = 5L
 
     private val circuitBreaker = CircuitBreaker.of(
         accountName,
         CircuitBreakerConfig.custom()
             .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.TIME_BASED)
             .slidingWindowSize(20)
-            .failureRateThreshold(60f)
-            .slowCallRateThreshold(70f)
+            .minimumNumberOfCalls(60)
+            .failureRateThreshold(55f)
+            .slowCallRateThreshold(60f)
             .slowCallDurationThreshold(Duration.ofMillis(500))
             .waitDurationInOpenState(Duration.ofSeconds(4))
-            .permittedNumberOfCallsInHalfOpenState(10)
+            .permittedNumberOfCallsInHalfOpenState(6)
             .build()
     )
 
@@ -143,7 +144,7 @@ class PaymentExternalSystemAdapterImpl(
 
         val request = HttpRequest.newBuilder()
             .uri(URI("http://$paymentProviderHostPort/external/process?serviceName=$serviceName&token=$token&accountName=$accountName&transactionId=$transactionId&paymentId=$paymentId&amount=$amount"))
-            .timeout(Duration.ofMillis(2000))
+            .timeout(Duration.ofMillis(1800))
             .POST(HttpRequest.BodyPublishers.noBody())
             .build()
 
