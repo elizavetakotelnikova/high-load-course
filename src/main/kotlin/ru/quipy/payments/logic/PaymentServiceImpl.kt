@@ -1,5 +1,8 @@
 package ru.quipy.payments.logic
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Service
@@ -20,10 +23,13 @@ class PaymentSystemImpl(
     companion object {
         val logger = LoggerFactory.getLogger(PaymentSystemImpl::class.java)
     }
+    private val scope = CoroutineScope(Dispatchers.IO)
 
     override fun submitPaymentRequest(paymentId: UUID, amount: Int, paymentStartedAt: Long, deadline: Long) {
-        for (account in paymentAccounts) {
-            account.performPaymentAsync(paymentId, amount, paymentStartedAt, deadline)
+        paymentAccounts.forEach { account ->
+            scope.launch {
+                account.performPaymentAsync(paymentId, amount, paymentStartedAt, deadline)
+            }
         }
     }
 }

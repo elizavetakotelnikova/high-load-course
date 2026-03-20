@@ -2,12 +2,14 @@
 POST http://localhost:1234/test/run
 Content-Type: application/json
 
+Аккаунт: "acc-22"
+
 {
   "serviceName": "{{serviceName}}",
   "token": "{{token}}",
-  "ratePerSecond": 1,
-  "testCount": 100,
-  "processingTimeMillis": 80000
+  "ratePerSecond": 100,
+   "testCount": 20000,
+   "processingTimeMillis": 1500
 }
 
 ### Stop running test to save time and resources
